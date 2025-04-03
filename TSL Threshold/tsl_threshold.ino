@@ -4,7 +4,7 @@
 #include <math.h>
 
 // Pin definitions
-#define SLED 4         // Your sensor LED
+#define SLED 4         // Sensor LED
 #define MOTOR_LED 2    // ESP32 built-in LED (GPIO 2)
 
 // Sensor setup
@@ -22,21 +22,40 @@ const float THRESHOLD_OFFSET = 30;
 const int windowSize = 10;
 float luxWindow[windowSize];
 int luxIndex = 0;
+int samplesCollected = 0;  // Count of valid samples in the window
 float zThreshold = 2.0;
+
+// Warm-up timer
+bool baselineReady = false;
+unsigned long baselineStartTime;
+const unsigned long warmupDuration = 5000; // 5 seconds
 
 void setup() {
   Serial.begin(9600);
   pinMode(SLED, OUTPUT);
   pinMode(MOTOR_LED, OUTPUT);
-  digitalWrite(MOTOR_LED, LOW); // ensure LED is off initially
+  digitalWrite(MOTOR_LED, LOW);
 
   tsl.setGain(TSL2591_GAIN_LOW);
   tsl.setTiming(TSL2591_INTEGRATIONTIME_100MS);
 
+  baselineStartTime = millis();
   Serial.println("TSL threshold detection initializing...");
 }
 
 void loop() {
+  // Wait for EMA and first luxWindow buffer to fill
+  if (!baselineReady) {
+    if (millis() - baselineStartTime >= warmupDuration) {
+      baselineReady = true;
+      Serial.println("✅ Baseline initialized, collecting initial lux data...");
+    } else {
+      Serial.println("⌛ Warming up...");
+      delay(500);
+      return;
+    }
+  }
+
   float currentLux = readLux();
 
   // Apply EMA
@@ -48,6 +67,14 @@ void loop() {
   // Update sliding window for Z-score
   luxWindow[luxIndex] = currentLux;
   luxIndex = (luxIndex + 1) % windowSize;
+
+  // Fill the window before using z-score detection
+  if (samplesCollected < windowSize) {
+    samplesCollected++;
+    Serial.println("📊 Filling lux window...");
+    delay(500);
+    return;
+  }
 
   float mean = calculateMean(luxWindow);
   float stdDev = calculateStdDev(luxWindow, mean);
@@ -62,12 +89,12 @@ void loop() {
   Serial.print(" | Z-Score: ");
   Serial.println(zScore);
 
-  // Detection
+  // Detection logic
   if (currentLux > adaptiveThreshold && abs(zScore) > zThreshold) {
     Serial.println("⚠️ Motor Stop");
-    digitalWrite(MOTOR_LED, HIGH); // turn on ESP32 LED
+    digitalWrite(MOTOR_LED, HIGH);
   } else {
-    digitalWrite(MOTOR_LED, LOW);  // turn off ESP32 LED
+    digitalWrite(MOTOR_LED, LOW);
   }
 
   delay(500);
