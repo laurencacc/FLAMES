@@ -11,19 +11,19 @@
 Adafruit_TSL2591 tsl = Adafruit_TSL2591(2591);
 
 // EMA constants
-const float EMA_ALPHA = 0.6;
+const float EMA_ALPHA = 0.7;
 float emaLux = 0;
 
 // Adaptive thresholding
 float adaptiveThreshold = 0;
-const float THRESHOLD_OFFSET = 30;
+const float THRESHOLD_OFFSET = 3;
 
 // Z-score detection
 const int windowSize = 10;
 float luxWindow[windowSize];
 int luxIndex = 0;
 int samplesCollected = 0;  // Count of valid samples in the window
-float zThreshold = 2.0;
+float zThreshold = 1.5;
 
 // Warm-up timer
 bool baselineReady = false;
@@ -36,8 +36,9 @@ void setup() {
   pinMode(MOTOR_LED, OUTPUT);
   digitalWrite(MOTOR_LED, LOW);
 
-  tsl.setGain(TSL2591_GAIN_LOW);
-  tsl.setTiming(TSL2591_INTEGRATIONTIME_100MS);
+  tsl.setGain(TSL2591_GAIN_MED);                         
+  tsl.setTiming(TSL2591_INTEGRATIONTIME_100MS);          
+
 
   baselineStartTime = millis();
   Serial.println("TSL threshold detection initializing...");
@@ -57,6 +58,10 @@ void loop() {
   }
 
   float currentLux = readLux();
+  if (isnan(currentLux) || isinf(currentLux)) {
+    currentLux = 0;
+  }
+
 
   // Apply EMA
   emaLux = EMA_ALPHA * currentLux + (1 - EMA_ALPHA) * emaLux;
@@ -78,16 +83,24 @@ void loop() {
 
   float mean = calculateMean(luxWindow);
   float stdDev = calculateStdDev(luxWindow, mean);
-  float zScore = (currentLux - mean) / stdDev;
 
-  Serial.print("Current Lux: ");
+  // Handle bad stdDev or no variance case
+  float zScore = 0;
+  if (stdDev > 0 && !isnan(stdDev) && !isinf(stdDev)) {
+    zScore = (currentLux - mean) / stdDev;
+  } else {
+    zScore = 0;
+  }
+
+  Serial.print("Lux:");
   Serial.print(currentLux);
-  Serial.print(" | EMA: ");
+  Serial.print(",EMA:");
   Serial.print(emaLux);
-  Serial.print(" | Threshold: ");
+  Serial.print(",Threshold:");
   Serial.print(adaptiveThreshold);
-  Serial.print(" | Z-Score: ");
+  Serial.print(",Z:");
   Serial.println(zScore);
+
 
   // Detection logic
   if (currentLux > adaptiveThreshold && abs(zScore) > zThreshold) {
