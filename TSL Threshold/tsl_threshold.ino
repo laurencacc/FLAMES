@@ -11,12 +11,12 @@
 Adafruit_TSL2591 tsl = Adafruit_TSL2591(2591);
 
 // EMA constants
-const float EMA_ALPHA = 0.7;
+const float EMA_ALPHA = 0.6;
 float emaLux = 0;
 
 // Adaptive thresholding
 float adaptiveThreshold = 0;
-const float THRESHOLD_OFFSET = 3;
+const float THRESHOLD_OFFSET = 3000;
 
 // Z-score detection
 const int windowSize = 10;
@@ -120,7 +120,8 @@ float readLux() {
   uint16_t ir = lum >> 16;
   uint16_t full = lum & 0xFFFF;
   digitalWrite(SLED, LOW);
-  return tsl.calculateLux(full, ir);
+  float visible = full - ir;
+  return (float)visible;
 }
 
 float calculateMean(float data[]) {
