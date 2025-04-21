@@ -1,11 +1,14 @@
 #include <Wire.h>
+
 #include <Adafruit_Sensor.h>
+
 #include "Adafruit_TSL2591.h"
+
 #include <math.h>
 
 // Pin definitions
-#define SLED 4         // Sensor LED
-#define MOTOR_LED 2    // ESP32 built-in LED (GPIO 2)
+#define SLED 4 // Sensor LED
+#define MOTOR_LED 2 // ESP32 built-in LED (GPIO 2)
 
 // Sensor setup
 Adafruit_TSL2591 tsl = Adafruit_TSL2591(2591);
@@ -22,7 +25,7 @@ const float THRESHOLD_OFFSET = 3000;
 const int windowSize = 10;
 float luxWindow[windowSize];
 int luxIndex = 0;
-int samplesCollected = 0;  // Count of valid samples in the window
+int samplesCollected = 0; // Count of valid samples in the window
 float zThreshold = 1.5;
 
 // Warm-up timer
@@ -36,9 +39,8 @@ void setup() {
   pinMode(MOTOR_LED, OUTPUT);
   digitalWrite(MOTOR_LED, LOW);
 
-  tsl.setGain(TSL2591_GAIN_MED);                         
-  tsl.setTiming(TSL2591_INTEGRATIONTIME_100MS);          
-
+  tsl.setGain(TSL2591_GAIN_MED);
+  tsl.setTiming(TSL2591_INTEGRATIONTIME_100MS);
 
   baselineStartTime = millis();
   Serial.println("TSL threshold detection initializing...");
@@ -61,7 +63,6 @@ void loop() {
   if (isnan(currentLux) || isinf(currentLux)) {
     currentLux = 0;
   }
-
 
   // Apply EMA
   emaLux = EMA_ALPHA * currentLux + (1 - EMA_ALPHA) * emaLux;
@@ -101,7 +102,6 @@ void loop() {
   Serial.print(",Z:");
   Serial.println(zScore);
 
-
   // Detection logic
   if (currentLux > adaptiveThreshold && abs(zScore) > zThreshold) {
     Serial.println("⚠️ Motor Stop");
@@ -121,7 +121,7 @@ float readLux() {
   uint16_t full = lum & 0xFFFF;
   digitalWrite(SLED, LOW);
   float visible = full - ir;
-  return (float)visible;
+  return (float) visible;
 }
 
 float calculateMean(float data[]) {

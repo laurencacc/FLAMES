@@ -1,6 +1,9 @@
 #include <Wire.h>
+
 #include <Adafruit_Sensor.h>
+
 #include "Adafruit_TSL2591.h"
+
 #include <math.h>
 
 // --- Pins ---
@@ -17,6 +20,10 @@ volatile bool motorRunning = false;
 volatile bool motorPermanentlyStopped = false;
 bool systemStarted = false;
 bool buttonPreviouslyPressed = false;
+
+bool ledBlinking = false;
+unsigned long lastBlinkTime = 0;
+const unsigned long blinkInterval = 250; // 250ms = fast blink
 
 // --- Sensor ---
 Adafruit_TSL2591 tsl = Adafruit_TSL2591(2591);
@@ -56,11 +63,10 @@ void setup() {
   digitalWrite(BUZZER_PIN, LOW); // start silent
   noTone(BUZZER_PIN);
 
-
   digitalWrite(DIR_PIN, HIGH); // Initial motor direction
-  digitalWrite(EN_PIN, HIGH);  // Motor disabled initially
+  digitalWrite(EN_PIN, LOW);
 
-  tsl.setGain(TSL2591_GAIN_HIGH);
+  tsl.setGain(TSL2591_GAIN_MED);
   tsl.setTiming(TSL2591_INTEGRATIONTIME_100MS);
 
   Serial.println("🔴 System idle. Press button to start.");
@@ -71,8 +77,8 @@ void setup() {
     "Stepper Task",
     10000,
     NULL,
-    1,
-    &stepperTaskHandle,
+    1, &
+    stepperTaskHandle,
     0
   );
 }
@@ -80,102 +86,114 @@ void setup() {
 void handleButton() {
   static unsigned long lastDebounceTime = 0;
   const unsigned long debounceDelay = 200;
-  bool buttonState = digitalRead(BUTTON_PIN) == LOW;
+  bool pressed = digitalRead(BUTTON_PIN) == LOW;
 
-  if (buttonState && !buttonPreviouslyPressed && (millis() - lastDebounceTime > debounceDelay)) {
+  if (pressed && !buttonPreviouslyPressed
+      && millis() - lastDebounceTime > debounceDelay) {
     lastDebounceTime = millis();
+    // toggle
     systemStarted = !systemStarted;
 
     if (systemStarted) {
+      // → START
       Serial.println("🟢 System Started.");
-      motorRunning = true;
+      motorRunning      = true;
       motorPermanentlyStopped = false;
+      ledBlinking       = false;
+      noTone(BUZZER_PIN);
+
+      // reset warm‑up & stats
       baselineReady = false;
       samplesCollected = 0;
       luxIndex = 0;
+      emaLux = 0;
       baselineStartTime = millis();
-      digitalWrite(EN_PIN, LOW);  // Enable motor
+
+      // re‑enable motor driver if you want
+      digitalWrite(EN_PIN, LOW);
       digitalWrite(MOTOR_LED, LOW);
-      digitalWrite(BUZZER_PIN, LOW);
-      noTone(BUZZER_PIN);  
     } else {
+      // → RESET/STOP
       Serial.println("🔁 System Reset.");
-      motorRunning = false;
+      motorRunning      = false;
       motorPermanentlyStopped = false;
-      baselineReady = false;
-      samplesCollected = 0;
-      luxIndex = 0;
-      digitalWrite(EN_PIN, HIGH); // Disable motor
+      ledBlinking       = false;
       digitalWrite(MOTOR_LED, LOW);
-      digitalWrite(BUZZER_PIN, LOW);
+      noTone(BUZZER_PIN);
+      digitalWrite(EN_PIN, HIGH);  // disable driver
     }
   }
 
-  buttonPreviouslyPressed = buttonState;
+  buttonPreviouslyPressed = pressed;
 }
 
 void loop() {
   handleButton();
 
-  if (!systemStarted || motorPermanentlyStopped) {
+  if (!systemStarted) {
+    // idle until started
     taskYIELD();
     return;
   }
 
-  unsigned long nowMillis = millis();
+  // blink logic
+  if (ledBlinking && millis() - lastBlinkTime >= blinkInterval) {
+    lastBlinkTime = millis();
+    digitalWrite(MOTOR_LED, !digitalRead(MOTOR_LED));
+  }
 
-  // Warm-up wait
+  // warm‑up phase
   if (!baselineReady) {
-    if (nowMillis - baselineStartTime >= warmupDuration) {
+    if (millis() - baselineStartTime >= warmupDuration) {
       baselineReady = true;
-      Serial.println("✅ Baseline ready.");
+      Serial.println("✅ Baseline ready. Motor running.");
     }
+    taskYIELD();
     return;
   }
 
-  // Lux read every 500ms
-  if (nowMillis - lastSensorCheck >= sensorInterval) {
-    lastSensorCheck = nowMillis;
+  // sample every sensorInterval
+  if (millis() - lastSensorCheck >= sensorInterval) {
+    lastSensorCheck = millis();
 
     float currentLux = readLux();
     if (isnan(currentLux) || isinf(currentLux)) currentLux = 0;
 
+    // EMA + threshold
     emaLux = EMA_ALPHA * currentLux + (1 - EMA_ALPHA) * emaLux;
     adaptiveThreshold = emaLux + THRESHOLD_OFFSET;
 
+    // sliding window
     luxWindow[luxIndex] = currentLux;
     luxIndex = (luxIndex + 1) % windowSize;
-
     if (samplesCollected < windowSize) {
       samplesCollected++;
       Serial.println("📊 Collecting lux window...");
       return;
     }
 
-    float mean = calculateMean(luxWindow);
+    float mean   = calculateMean(luxWindow);
     float stdDev = calculateStdDev(luxWindow, mean);
-    float zScore = (stdDev > 0) ? (currentLux - mean) / stdDev : 0;
+    float zScore = (stdDev>0) ? (currentLux - mean) / stdDev : 0;
 
-    Serial.print("Lux: "); Serial.print(currentLux);
-    Serial.print(" | EMA: "); Serial.print(emaLux);
-    Serial.print(" | Threshold: "); Serial.print(adaptiveThreshold);
-    Serial.print(" | Z-Score: "); Serial.println(zScore);
+    Serial.printf("Lux:%.1f EMA:%.1f Thr:%.1f Z:%.2f\n",
+                  currentLux, emaLux, adaptiveThreshold, zScore);
 
-    if (!motorPermanentlyStopped && currentLux > adaptiveThreshold && abs(zScore) > zThreshold) {
+    // detection
+    if (currentLux > adaptiveThreshold
+        && fabs(zScore) > zThreshold) {
       Serial.println("🔥 Fire detected! Motor stopped.");
       motorRunning = false;
-      motorPermanentlyStopped = true;
-      digitalWrite(MOTOR_LED, HIGH);
-      digitalWrite(BUZZER_PIN, HIGH);
-      tone(BUZZER_PIN, 1000);
-      digitalWrite(EN_PIN, HIGH); // Disable motor
+      ledBlinking  = true;
+      tone(BUZZER_PIN, 3000);
+      digitalWrite(EN_PIN, HIGH);  // optional driver disable
     }
   }
 
-  taskYIELD(); // Yield to Core 0
+  taskYIELD();
 }
 
-void stepperTask(void *parameter) {
+void stepperTask(void * parameter) {
   while (true) {
     if (motorRunning && !motorPermanentlyStopped) {
       digitalWrite(STEP_PIN, HIGH);
@@ -198,7 +216,7 @@ float readLux() {
   uint16_t full = lum & 0xFFFF;
   // digitalWrite(SLED, LOW);
   float visible = full - ir;
-  return (float)visible;
+  return (float) visible;
 }
 
 float calculateMean(float data[]) {
