@@ -1,10 +1,7 @@
-#include <Wire.h>
-
 #include <Adafruit_Sensor.h>
-
-#include "Adafruit_TSL2591.h"
-
+#include <Wire.h>
 #include <math.h>
+#include "Adafruit_TSL2591.h"
 
 // --- Pins ---
 #define STEP_PIN 18
@@ -23,7 +20,7 @@ bool buttonPreviouslyPressed = false;
 
 bool ledBlinking = false;
 unsigned long lastBlinkTime = 0;
-const unsigned long blinkInterval = 250; // 250ms = fast blink
+const unsigned long blinkInterval = 250;  // 250ms = fast blink
 
 // --- Sensor ---
 Adafruit_TSL2591 tsl = Adafruit_TSL2591(2591);
@@ -50,7 +47,7 @@ TaskHandle_t stepperTaskHandle;
 void setup() {
   Serial.begin(9600);
 
-  // pinMode(SLED, OUTPUT); 
+  // pinMode(SLED, OUTPUT);
   pinMode(MOTOR_LED, OUTPUT);
   digitalWrite(MOTOR_LED, LOW);
 
@@ -60,10 +57,10 @@ void setup() {
   pinMode(BUTTON_PIN, INPUT_PULLUP);
 
   pinMode(BUZZER_PIN, OUTPUT);
-  digitalWrite(BUZZER_PIN, LOW); // start silent
+  digitalWrite(BUZZER_PIN, LOW);  // start silent
   noTone(BUZZER_PIN);
 
-  digitalWrite(DIR_PIN, HIGH); // Initial motor direction
+  digitalWrite(DIR_PIN, HIGH);  // Initial motor direction
   digitalWrite(EN_PIN, LOW);
 
   tsl.setGain(TSL2591_GAIN_MED);
@@ -72,15 +69,8 @@ void setup() {
   Serial.println("🔴 System idle. Press button to start.");
 
   // Start stepper motor task on Core 0
-  xTaskCreatePinnedToCore(
-    stepperTask,
-    "Stepper Task",
-    10000,
-    NULL,
-    1, &
-    stepperTaskHandle,
-    0
-  );
+  xTaskCreatePinnedToCore(stepperTask, "Stepper Task", 10000, NULL, 1,
+                          &stepperTaskHandle, 0);
 }
 
 void handleButton() {
@@ -88,8 +78,8 @@ void handleButton() {
   const unsigned long debounceDelay = 200;
   bool pressed = digitalRead(BUTTON_PIN) == LOW;
 
-  if (pressed && !buttonPreviouslyPressed
-      && millis() - lastDebounceTime > debounceDelay) {
+  if (pressed && !buttonPreviouslyPressed &&
+      millis() - lastDebounceTime > debounceDelay) {
     lastDebounceTime = millis();
     // toggle
     systemStarted = !systemStarted;
@@ -97,9 +87,9 @@ void handleButton() {
     if (systemStarted) {
       // → START
       Serial.println("🟢 System Started.");
-      motorRunning      = true;
+      motorRunning = true;
       motorPermanentlyStopped = false;
-      ledBlinking       = false;
+      ledBlinking = false;
       noTone(BUZZER_PIN);
 
       // reset warm‑up & stats
@@ -115,9 +105,9 @@ void handleButton() {
     } else {
       // → RESET/STOP
       Serial.println("🔁 System Reset.");
-      motorRunning      = false;
+      motorRunning = false;
       motorPermanentlyStopped = false;
-      ledBlinking       = false;
+      ledBlinking = false;
       digitalWrite(MOTOR_LED, LOW);
       noTone(BUZZER_PIN);
       digitalWrite(EN_PIN, HIGH);  // disable driver
@@ -172,19 +162,18 @@ void loop() {
       return;
     }
 
-    float mean   = calculateMean(luxWindow);
+    float mean = calculateMean(luxWindow);
     float stdDev = calculateStdDev(luxWindow, mean);
-    float zScore = (stdDev>0) ? (currentLux - mean) / stdDev : 0;
+    float zScore = (stdDev > 0) ? (currentLux - mean) / stdDev : 0;
 
-    Serial.printf("Lux:%.1f EMA:%.1f Thr:%.1f Z:%.2f\n",
-                  currentLux, emaLux, adaptiveThreshold, zScore);
+    Serial.printf("Lux:%.1f EMA:%.1f Thr:%.1f Z:%.2f\n", currentLux, emaLux,
+                  adaptiveThreshold, zScore);
 
     // detection
-    if (currentLux > adaptiveThreshold
-        && fabs(zScore) > zThreshold) {
+    if (currentLux > adaptiveThreshold && fabs(zScore) > zThreshold) {
       Serial.println("🔥 Fire detected! Motor stopped.");
       motorRunning = false;
-      ledBlinking  = true;
+      ledBlinking = true;
       tone(BUZZER_PIN, 3000);
       digitalWrite(EN_PIN, HIGH);  // optional driver disable
     }
@@ -193,7 +182,7 @@ void loop() {
   taskYIELD();
 }
 
-void stepperTask(void * parameter) {
+void stepperTask(void* parameter) {
   while (true) {
     if (motorRunning && !motorPermanentlyStopped) {
       digitalWrite(STEP_PIN, HIGH);
@@ -201,10 +190,10 @@ void stepperTask(void * parameter) {
       digitalWrite(STEP_PIN, LOW);
       delayMicroseconds(stepDelayMicros);
     } else {
-      delay(10); // Lower CPU use
+      delay(10);  // Lower CPU use
     }
 
-    vTaskDelay(1 / portTICK_PERIOD_MS); // Feed watchdog
+    vTaskDelay(1 / portTICK_PERIOD_MS);  // Feed watchdog
   }
 }
 
@@ -216,7 +205,7 @@ float readLux() {
   uint16_t full = lum & 0xFFFF;
   // digitalWrite(SLED, LOW);
   float visible = full - ir;
-  return (float) visible;
+  return (float)visible;
 }
 
 float calculateMean(float data[]) {
