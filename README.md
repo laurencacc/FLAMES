@@ -25,6 +25,9 @@ The FLAMES (Fire Detection and Monitoring for Emergency Systems) project is a re
 - **Test/**  
   General testing and prototyping files.
 
+- **Raspberry_Pi/**
+  Raspberry Pi code using OpenCV on Python
+
 ## Technologies Used
 
 - ESP32 Microcontroller  
