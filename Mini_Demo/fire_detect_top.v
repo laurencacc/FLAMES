@@ -5,13 +5,14 @@ module fire_detect_top(
   input JA1,                  // SPI_MOSI
   input JA3,                  // SPI_SCK
   input JA4,                  // SPI_SS
-  output JA7,                  // detect flag to ESP32
+  output JA7,                 // detect flag to ESP32
   output LED0                 // debug LED
 );
+
   wire [15:0] lux_data;
   wire valid;
   wire detect;
-  wire debug_led;
+  wire debug_led;             // wire from spi_slave to LED0
 
   spi_slave spi_inst (
     .clk(CLK100MHZ),
@@ -20,7 +21,7 @@ module fire_detect_top(
     .spi_cs(JA4),
     .data_out(lux_data),
     .data_valid(valid),
-    .debug_led(debug_led)
+    .debug_led(debug_led)     // connect debug output here
   );
 
   fire_detect fire_inst (
@@ -31,6 +32,5 @@ module fire_detect_top(
   );
 
   assign JA7 = detect;
-  assign LED0 = debug_led;
+  assign LED0 = debug_led;    // drive the onboard LED
 endmodule
-
