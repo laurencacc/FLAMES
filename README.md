@@ -2,7 +2,7 @@
 
 **SD Group 6 | FLAMES Project**  
 University of Central Florida  
-Spring 2025  
+Spring 2025 - Summer 2025
 
 ## Overview
 
