@@ -7,7 +7,7 @@
 #define STEP_PIN 18
 #define DIR_PIN 19
 #define EN_PIN 5
-#define BUTTON_PIN 15
+#define BUTTON_PIN 26
 #define BUZZER_PIN 4
 #define MOTOR_LED 2
 

@@ -6,10 +6,10 @@
 // --- Pins ---
 #define STEP_PIN 18
 #define DIR_PIN 19
-#define BUTTON_PIN 15
+#define BUTTON_PIN 26
 #define MOTOR_LED 2
 #define SLED 4
-#define EN 5
+//#define EN 5
 
 // --- Stepper Motor ---
 const int stepDelayMicros = 800;  // Adjust for speed
