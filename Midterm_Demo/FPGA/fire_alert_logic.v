@@ -1,34 +1,70 @@
-module fire_alert_logic (
-    input wire clk,              // System clock (can be slow, e.g. 1 Hz-50 MHz)
-    input wire reset_n,          // Active-low reset
-    input wire fft_flag,         // From ESP32: FFT fire detected
-    input wire cam_flag,         // From Pi: Camera fire detected
-    output reg final_alert       // To ESP32: Final confirmed fire alert
+module fire_alert_logic #(
+    parameter DELAY_CYCLES = 10
+)(
+    input  wire clk,
+    input  wire reset_n,
+    input  wire fft_flag_in,
+    input  wire cam_flag_in,
+    output reg  final_alert_out,
+    output wire fft_debug,
+    output wire cam_debug
 );
 
-// Optional: Synchronize inputs if coming from async sources
-reg fft_sync_1, fft_sync_2;
-reg cam_sync_1, cam_sync_2;
+    // === 1. Synchronize inputs
+    reg fft_sync0, fft_sync1;
+    reg cam_sync0, cam_sync1;
 
-always @(posedge clk or negedge reset_n) begin
-    if (!reset_n) begin
-        {fft_sync_1, fft_sync_2} <= 2'b00;
-        {cam_sync_1, cam_sync_2} <= 2'b00;
-    end else begin
-        fft_sync_1 <= fft_flag;
-        fft_sync_2 <= fft_sync_1;
-
-        cam_sync_1 <= cam_flag;
-        cam_sync_2 <= cam_sync_1;
+    always @(posedge clk or negedge reset_n) begin
+        if (!reset_n) begin
+            fft_sync0 <= 0; fft_sync1 <= 0;
+            cam_sync0 <= 0; cam_sync1 <= 0;
+        end else begin
+            fft_sync0 <= fft_flag_in;
+            fft_sync1 <= fft_sync0;
+            cam_sync0 <= cam_flag_in;
+            cam_sync1 <= cam_sync0;
+        end
     end
-end
 
-// Combine synced flags
-always @(posedge clk or negedge reset_n) begin
-    if (!reset_n)
-        final_alert <= 1'b0;
-    else
-        final_alert <= fft_sync_2 & cam_sync_2;
-end
+    // === 2. Latch
+    reg fft_latched, cam_latched;
+    always @(posedge clk or negedge reset_n) begin
+        if (!reset_n) begin
+            fft_latched <= 0;
+            cam_latched <= 0;
+        end else begin
+            if (fft_sync1) fft_latched <= 1;
+            if (cam_sync1) cam_latched <= 1;
+        end
+    end
+
+    assign fft_debug = fft_latched;
+    assign cam_debug = cam_latched;
+
+    // === 3. Final alert delay logic
+    localparam DELAY_WIDTH = 4;
+    reg [DELAY_WIDTH-1:0] delay_cnt;
+    reg delay_active;
+
+    always @(posedge clk or negedge reset_n) begin
+        if (!reset_n) begin
+            delay_cnt       <= 0;
+            delay_active    <= 0;
+            final_alert_out <= 0;
+        end else if (!final_alert_out) begin
+            if (fft_latched && cam_latched && !delay_active) begin
+                delay_active <= 1;
+                delay_cnt    <= 0;
+            end
+
+            if (delay_active) begin
+                if (delay_cnt < DELAY_CYCLES - 1) begin
+                    delay_cnt <= delay_cnt + 1;
+                end else begin
+                    final_alert_out <= 1;
+                end
+            end
+        end
+    end
 
 endmodule

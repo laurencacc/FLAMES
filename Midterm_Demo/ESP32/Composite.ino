@@ -14,9 +14,11 @@
 #define PIN_CS       27  // Changed to match FFT code
 #define PIN_MISO     16
 #define PIN_MOSI     13  // Not used for ADS8319
-#define FFT_FLAG_PIN     5    // ESP32 ➜ FPGA
-#define FINAL_ALERT_PIN  25   // FPGA ➜ ESP32
-#define PI_TRIGGER_PIN 32
+#define FFT_FLAG_PIN     17    // ESP32 ➜ FPGA // Titled CS on MCU Board for FPGA
+#define FINAL_ALERT_PIN  25   // FPGA ➜ ESP32 // Titled Alert Pin On MCU board for FPGA
+#define PI_TRIGGER_PIN 32 // Titled CS for Pi on MCU Board (second from top pin)
+#define FPGA_RESET_PIN 16  // Choose any available GPIO // Titled MISO
+
 
 // --- Constants ---
 const unsigned long sensorInterval = 500;
@@ -47,7 +49,7 @@ bool emaFFTInitialized = false;
 // --- TSL2591 ---
 Adafruit_TSL2591 tsl = Adafruit_TSL2591(2591);
 const uint8_t EMA_ALPHA = 20;
-const uint16_t THRESHOLD_OFFSET = 200;
+const uint16_t THRESHOLD_OFFSET = 50;
 
 // --- FFT ---
 double vReal[samples];
@@ -72,7 +74,10 @@ void setup() {
   pinMode(PIN_CS, OUTPUT);
   pinMode(PIN_SCLK, OUTPUT);
   pinMode(PIN_MISO, INPUT);
-  pinMode(PI_TRIGGER_PIN, OUTPUT); 
+  pinMode(PI_TRIGGER_PIN, OUTPUT);
+  pinMode(FPGA_RESET_PIN, OUTPUT);
+  digitalWrite(FPGA_RESET_PIN, HIGH);  // Default state = not reset
+ 
 
   digitalWrite(PI_TRIGGER_PIN, LOW);
   digitalWrite(PIN_CS, HIGH);
@@ -118,6 +123,7 @@ void handleButton() {
   if (pressed && !buttonPreviouslyPressed && millis() - lastDebounceTime > debounceDelay) {
     lastDebounceTime = millis();
     systemStarted = !systemStarted;
+    digitalWrite(FFT_FLAG_PIN, LOW);
     if (systemStarted) {
       Serial.println("🟢 System Started.");
       fireFlag = false;
@@ -130,6 +136,11 @@ void handleButton() {
       digitalWrite(MOTOR_LED, LOW);
       noTone(BUZZER_PIN);
       resetToStartPosition();
+      // Reset FPGA
+      digitalWrite(FPGA_RESET_PIN, LOW);
+      delay(50);  // brief reset
+      digitalWrite(FPGA_RESET_PIN, HIGH);
+      Serial.println("🔄 FPGA Reset");
     } else {
       Serial.println("🔁 System Reset.");
       motorRunning = false;
@@ -177,6 +188,7 @@ void sensorTask(void* parameter) {
   while (true) {
     if (!systemStarted || fireFlag) {
       vTaskDelay(pdMS_TO_TICKS(sensorInterval));
+      digitalWrite(FFT_FLAG_PIN, LOW);
       continue;
     }
 
@@ -195,6 +207,9 @@ void sensorTask(void* parameter) {
       Serial.println("⚠️  TSL Triggered. Starting FFT + Pi check...");
       tslTriggered = true;
 
+      // Pause motor while confirming
+      motorRunning = false;
+
       // Tell Pi to start camera detection
       digitalWrite(PI_TRIGGER_PIN, HIGH);
       delay(100);  // Allow Pi to detect the rising edge
@@ -202,22 +217,24 @@ void sensorTask(void* parameter) {
       bool flameConfirmed = runFftDetection();
 
       digitalWrite(PI_TRIGGER_PIN, LOW);
-hostname 
       if (flameConfirmed) {
         fireFlag = true;
         Serial.println("✅ FIRE CONFIRMED by full pipeline (TSL ➜ Pi ➜ FFT ➜ FPGA).");
         digitalWrite(MOTOR_LED, HIGH);
         tone(BUZZER_PIN, 3000);
-        motorRunning = false;
         motorPermanentlyStopped = true;
       } else {
         Serial.println("❌ Detection complete. No fire confirmed after full pipeline (TSL ➜ Pi ➜ FFT ➜ FPGA).");
+        motorRunning = true;
       }
-    } else {
-      Serial.printf("Lux: %.1f (Fixed: %u, Threshold: %u, EMA: %u)\n", lux, lux_fixed, threshold, ema);
+
+      // ✅ Reset for next detection attempt
+      tslTriggered = false;
+      ema_initialized = false;
+      emaFFTInitialized = false;
     }
 
-    vTaskDelay(pdMS_TO_TICKS(sensorInterval));
+    vTaskDelay(pdMS_TO_TICKS(sensorInterval));  // ✅ Keep sensor reads paced
   }
 }
 
@@ -244,7 +261,17 @@ uint16_t readADS8319() {
   return result;
 }
 
+// bool runFftDetection() {
+//   digitalWrite(FFT_FLAG_PIN, HIGH);
+//   delay(100);
+//   bool finalFire = digitalRead(FINAL_ALERT_PIN);
+//   digitalWrite(FFT_FLAG_PIN, LOW);
+//   return finalFire;
+// }
+
+
 bool runFftDetection() {
+  digitalWrite(FFT_FLAG_PIN, LOW);
   const double ADC_OFFSET = 32768.0;
   double currentBandSum = 0.0;
   int activeBins = 0;
@@ -284,16 +311,40 @@ bool runFftDetection() {
     }
   }
 
-  bool flameDetectedNow = (activeBins >= 5) && (energySum > (2 * adaptiveThreshold));
+  bool flameDetectedNow = (activeBins >= 28) && (energySum > (3.5 * adaptiveThreshold));
+
+  Serial.println("📊 --- FFT Detection Debug ---");
+  Serial.printf("📉 Band Avg: %.1f\n", bandAvg);
+  Serial.printf("📈 EMA Magnitude: %.1f\n", emaMagnitude);
+  Serial.printf("🔺 Adaptive Threshold: %.1f\n", adaptiveThreshold);
+  Serial.printf("📦 Active Bins: %d\n", activeBins);
+  Serial.printf("⚡ Energy Sum: %.1f\n", energySum);
+  Serial.printf("🔥 FFT Detected Fire: %s\n", flameDetectedNow ? "YES" : "NO");
+  Serial.println("-------------------------------");
+
   if (flameDetectedNow) {
-    digitalWrite(FFT_FLAG_PIN, HIGH);  // Tell FPGA
-    delay(100);                         // Allow FPGA to latch
-    bool finalFire = digitalRead(FINAL_ALERT_PIN);  // Get decision
-    digitalWrite(FFT_FLAG_PIN, LOW);   // Clear after
+    digitalWrite(FFT_FLAG_PIN, HIGH);  // ✅ HOLD HIGH
+    Serial.println("🚩 FFT_FLAG_PIN set HIGH");
+
+    unsigned long startTime = millis();
+    bool finalFire = false;
+
+    while (millis() - startTime < 2000) {
+      if (digitalRead(FINAL_ALERT_PIN)) {
+        finalFire = true;
+        break;
+      }
+      delay(10);
+    }
+
+    Serial.printf("🔥 FPGA Response: %s\n", finalFire ? "FIRE" : "NO FIRE");
+    digitalWrite(FFT_FLAG_PIN, LOW);  // ✅ Drop only after response
     return finalFire;
   }
+
   return false;
 }
+
 
 void resetToStartPosition() {
   if (stepCount == 0) return;
@@ -304,4 +355,4 @@ void resetToStartPosition() {
     digitalWrite(STEP_PIN, LOW);  delayMicroseconds(stepDelayMicros);
     stepCount += (stepCount > 0) ? -1 : 1;
   }
-}
+} 

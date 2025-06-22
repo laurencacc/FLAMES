@@ -30,15 +30,17 @@ def stop_camera(cap):
     cap.release()
     print("Camera stopped")
 
-# --- Main Loop ---
-NO_FIRE_TIMEOUT = 10  # seconds
+# --- State ---
+fire_latched = False  # Flag to latch fire detection
+NO_FIRE_TIMEOUT = 10  # Timeout to shut camera off if idle
 
+# --- Main Loop ---
 while True:
     print("Waiting for ESP32 TSL trigger...")
     while GPIO.input(TRIGGER_PIN) == 0:
         time.sleep(0.05)
-    print("Trigger received. Starting camera fire detection...")
 
+    print("Trigger received. Starting camera fire detection...")
     cap = start_camera()
     if cap is None:
         continue
@@ -52,6 +54,7 @@ while True:
             print("No frame. Restarting camera...")
             break
 
+        # Enhance frame and extract color spaces
         frame = cv2.GaussianBlur(frame, (3, 3), 0)
         frame = cv2.convertScaleAbs(frame, alpha=1.3, beta=10)
 
@@ -72,9 +75,8 @@ while True:
         ycc_mask = (Y > 180) & (Cr > 140) & ((Cr - Cb) > 20) & (flicker > 10)
         ycc_mask = ycc_mask.astype(np.uint8) * 255
 
-        combined_mask = ycc_mask.copy()
         confidence_boost = cv2.bitwise_and(ycc_mask, hsv_mask)
-        combined_mask = cv2.addWeighted(combined_mask, 1.0, confidence_boost, 0.5, 0)
+        combined_mask = cv2.addWeighted(ycc_mask, 1.0, confidence_boost, 0.5, 0)
 
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
         combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel)
@@ -89,24 +91,32 @@ while True:
                 cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 2)
                 cv2.putText(frame, "FIRE DETECTED", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
-        GPIO.output(FPGA_FLAG_OUT, GPIO.HIGH if fire_detected else GPIO.LOW)
+        # 🔒 Latch fire detection once
+        if fire_detected and not fire_latched:
+            GPIO.output(FPGA_FLAG_OUT, GPIO.HIGH)
+            time.sleep(0.5)
+            print("🔥 Fire detected. Setting FPGA flag HIGH.")
+            fire_latched = True
 
-        #cv2.imshow('Combined Fire Mask', combined_mask)
-        #cv2.imshow('Fire Detection', frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-
-        if fire_detected:
+        if fire_latched:
+            continue  # Do nothing — fire has been confirmed, keep camera open if needed
+        elif fire_detected:
             no_fire_start = None
         else:
             if no_fire_start is None:
                 no_fire_start = time.time()
             elif time.time() - no_fire_start > NO_FIRE_TIMEOUT:
                 print("No fire for a while. Going idle.")
-                GPIO.output(FPGA_FLAG_OUT, GPIO.LOW)
                 stop_camera(cap)
                 cap = None
                 break
 
-    #cv2.destroyAllWindows()
+
+        # Uncomment for display
+        # cv2.imshow('Combined Mask', combined_mask)
+        # cv2.imshow('Frame', frame)
+        # if cv2.waitKey(1) & 0xFF == ord('q'):
+        #     break
+
+# Cleanup
 GPIO.cleanup()

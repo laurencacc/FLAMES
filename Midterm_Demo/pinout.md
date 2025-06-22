@@ -25,7 +25,7 @@ This system integrates the ESP32, Basys 3 FPGA, and Raspberry Pi to form a fire 
 | ADS8319 - SCLK              | GPIO 14   | Output        | ADC Clock            |
 | ADS8319 - MISO              | GPIO 16   | Input         | ADC MISO             |
 | Pi Trigger (TSL detected)   | GPIO 32   | Output        | Pi GPIO 18 (input)   |
-| FFT Fire Flag (to FPGA)     | GPIO 5    | Output        | Basys 3 JA1          |
+| FFT Fire Flag (to FPGA)     | GPIO 17    | Output        | Basys 3 JA1          |
 | Final Fire Alert (from FPGA)| GPIO 25   | Input         | Basys 3 JA3          |
 
 ---
