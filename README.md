@@ -1,6 +1,6 @@
 # 🔥 FLAMES
 
-**SD Group 6 | FLAMES Project**  
+**Senior Design | Group 6 | FLAMES Project**  
 University of Central Florida  
 Spring 2025 - Summer 2025
 
@@ -10,30 +10,26 @@ The FLAMES (Fire Detection and Monitoring for Emergency Systems) project is a re
 
 ## Project Structure
 
-- **FPGA/**  
-  Contains Verilog/HDL code used for real-time signal processing and output control.
+- **Midterm_Demo/**  
+  Evolved demonstration setup used during the midterm demo to showcase core system functionality, involves code for BASYS 3 Dev Board, Custom ESP32-WROOM-32D PCB, and Raspberry Pi 5.
 
 - **Mini_Demo/**  
-  Compact demonstration setup to test core functionality in a controlled environment.
+  Initial compact demo setup for validating core functionality in a simplified environment.
 
 - **Ronex_Test/**  
-  Code and tests involving Ronex's board and motor interface trials.
-
-- **TSL Threshold/**  
-  Light intensity thresholding algorithms using the TSL2591 sensor, including EMA and Z-score logic.
+  Code and tests involving Ronex's ESP32 board and motor interface trials.
 
 - **Test/**  
   General testing and prototyping files.
 
- - **Raspberry_Pi/**  
-  Raspberry Pi code using OpenCV on Python
-
 ## Technologies Used
 
 - ESP32 Microcontroller  
-- Adafruit TSL2591 Light Sensor  
+- Adafruit TSL2591 Light Sensor
+- FDS1010 Silicon Photodiode  
 - DRV8825 Stepper Motor Driver  
 - Basys3 FPGA Board
+- Raspberry Pi 5
 - NEMA23 Motor  
 - MATLAB HDL Coder  
 - C++, Verilog, and Python  
@@ -41,7 +37,7 @@ The FLAMES (Fire Detection and Monitoring for Emergency Systems) project is a re
 
 ## Objective
 
-To detect fire signals quickly and accurately using light intensity, frequency characteristics, and real-time control systems—without relying on traditional smoke detection methods.
+To detect fire signals quickly and accurately using light intensity, frequency characteristics, color characteristics, and real-time control systems—without relying on traditional smoke detection methods.
 
 ## Contributors
 
