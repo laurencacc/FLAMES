@@ -24,16 +24,20 @@ The FLAMES (Fire Detection and Monitoring for Emergency Systems) project is a re
 
 ## Technologies Used
 
-- ESP32 Microcontroller  
+- ESP32-WROOM-32D Microcontroller  
 - Adafruit TSL2591 Light Sensor
 - FDS1010 Silicon Photodiode  
 - DRV8825 Stepper Motor Driver  
-- Basys3 FPGA Board
+- Basys 3 FPGA Board
 - Raspberry Pi 5
-- NEMA23 Motor  
+- Raspberry Pi Global Shutter CMOS Sensor
+- NEMA 23 Stepper Motor
+
+## Software and Frameworks Used
+
 - MATLAB HDL Coder  
 - C++, Verilog, and Python  
-- OpenCV (for image-based analysis)
+- OpenCV library (for image-based analysis)
 
 ## Objective
 
