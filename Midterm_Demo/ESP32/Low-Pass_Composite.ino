@@ -1,9 +1,13 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_TSL2591.h>
+#include <SPI.h>
 #include "arduinoFFT.h"
 #define USE_INTERNAL_ADC true  // Set to false to use ADS8319
+volatile bool resetting = false;
+
 
 #define ADC_pin 27  // Only used if USE_INTERNAL_ADC = true
+const double samplingFrequency = 100.0;
 
 // --- Pins ---
 #define STEP_PIN     18
@@ -18,16 +22,25 @@
 #define FPGA_RESET_PIN 13  // Choose any available GPIO // Titled MOSI
 // Sleep pin ?
 
+// --- Filter Coefficients ---
+const double w0 = 2 * M_PI * 10.0;  // 10 Hz cutoff frequency
+const double t = 1.0 / samplingFrequency;
+const double a = (w0 * t) / (2.0 + w0 * t);
+const double b = (2.0 - w0 * t) / (2.0 + w0 * t);
+
+// --- Persistent Filter State ---
+double x_prev = 0.0;
+double y_prev = 0.0;
+
 // --- Constants ---
 const unsigned long sensorInterval = 500;
 const int stepDelayMicros = 600;
 const int stepsPer90 = 400;
 const uint16_t samples = 1024;
-const double samplingFrequency = 100.0;
 const float VREF = 3.3;
-const int ADC_BITS = 16;
+const int ADC_BITS = 12;
 const double alpha = 0.2;
-const double thresholdMargin = 1000.0;
+const double thresholdMargin = 60.0;
 
 // --- State ---
 bool fireFlag = false;
@@ -43,6 +56,14 @@ uint16_t ema = 0;
 bool ema_initialized = false;
 double emaMagnitude = 0.0;
 bool emaFFTInitialized = false;
+
+// --- Stepper State ---
+struct StepperState {
+  bool moveRightNext;
+  bool currentlySweeping;
+};
+StepperState stepperState = { true, false };
+
 
 // --- TSL2591 ---
 Adafruit_TSL2591 tsl = Adafruit_TSL2591(2591);
@@ -110,33 +131,45 @@ void loop() {
 
 void handleButton() {
   static unsigned long lastDebounceTime = 0;
-  const unsigned long debounceDelay = 200;
+  const unsigned long debounceDelay = 500;
   bool pressed = digitalRead(BUTTON_PIN) == LOW;
   if (pressed && !buttonPreviouslyPressed && millis() - lastDebounceTime > debounceDelay) {
     lastDebounceTime = millis();
     systemStarted = !systemStarted;
     digitalWrite(FFT_FLAG_PIN, LOW);
-    if (systemStarted) {
+    if (systemStarted) {  // Only start if it was stopped and NOT in fire-locked mode
       Serial.println("🟢 System Started.");
-      fireFlag = false;
+      resetting = true;  // 🚨 PAUSE motor during full reset
       tslTriggered = false;
       ema_initialized = false;
       emaFFTInitialized = false;
-      motorRunning = true;
+      motorRunning = false;  // make sure stepper is paused
       motorPermanentlyStopped = false;
       ledBlinking = false;
+      fireFlag = false;
+      stepperState.moveRightNext = true;
+      stepperState.currentlySweeping = false;
       digitalWrite(MOTOR_LED, LOW);
       noTone(BUZZER_PIN);
-      resetToStartPosition();
+      resetToStartPosition();  // 🌀 Center the motor
+      x_prev = y_prev = 0.0;
+      stepCount = 0;
+
       // Reset FPGA
       digitalWrite(FPGA_RESET_PIN, LOW);
-      delay(50);  // brief reset
+      delay(50);
       digitalWrite(FPGA_RESET_PIN, HIGH);
       Serial.println("🔄 FPGA Reset");
+
+      resetting = false;  // ✅ Allow stepper to resume
+      motorRunning = true;
     } else {
       Serial.println("🔁 System Reset.");
       motorRunning = false;
       motorPermanentlyStopped = false;
+      fireFlag = false;
+      stepperState.moveRightNext = true;
+      stepperState.currentlySweeping = false;
       ledBlinking = false;
       digitalWrite(MOTOR_LED, LOW);
       noTone(BUZZER_PIN);
@@ -146,30 +179,32 @@ void handleButton() {
 }
 
 void stepperTask(void* parameter) {
-  bool moveRightNext = true;
-  bool currentlySweeping = false;
   while (true) {
+    if (resetting) {
+      vTaskDelay(10);
+      continue;
+    }
     if (motorRunning && !motorPermanentlyStopped) {
-      if (!currentlySweeping && stepCount == 0) {
-        digitalWrite(DIR_PIN, moveRightNext ? HIGH : LOW);
-        for (int i = 0; i < stepsPer90 && motorRunning && !motorPermanentlyStopped; i++) {
+      if (!stepperState.currentlySweeping && stepCount == 0) {
+        digitalWrite(DIR_PIN, stepperState.moveRightNext ? HIGH : LOW);
+        for (int i = 0; i < stepsPer90 && motorRunning && !motorPermanentlyStopped && !resetting; i++) {
           digitalWrite(STEP_PIN, HIGH); delayMicroseconds(1000);
           digitalWrite(STEP_PIN, LOW);  delayMicroseconds(7333);
-          stepCount += (moveRightNext ? 1 : -1);
+          stepCount += (stepperState.moveRightNext ? 1 : -1);
           if (i % 100 == 0) vTaskDelay(1);
         }
-        currentlySweeping = true;
-      } else if (currentlySweeping && stepCount != 0) {
+        stepperState.currentlySweeping = true;
+      } else if (stepperState.currentlySweeping && stepCount != 0) {
         digitalWrite(DIR_PIN, (stepCount > 0) ? LOW : HIGH);
         long stepsToCenter = abs(stepCount);
-        for (long i = 0; i < stepsToCenter && motorRunning && !motorPermanentlyStopped; i++) {
+        for (long i = 0; i < stepsToCenter && motorRunning && !motorPermanentlyStopped && !resetting; i++) {
           digitalWrite(STEP_PIN, HIGH); delayMicroseconds(1000);
           digitalWrite(STEP_PIN, LOW);  delayMicroseconds(7333);
           stepCount += (stepCount > 0) ? -1 : 1;
           if (i % 100 == 0) vTaskDelay(1);
         }
-        moveRightNext = !moveRightNext;
-        currentlySweeping = false;
+        stepperState.moveRightNext = !stepperState.moveRightNext;
+        stepperState.currentlySweeping = false;
       }
       vTaskDelay(pdMS_TO_TICKS(50));
     } else {
@@ -177,6 +212,7 @@ void stepperTask(void* parameter) {
     }
   }
 }
+
 
 void sensorTask(void* parameter) {
   while (true) {
@@ -219,7 +255,11 @@ void sensorTask(void* parameter) {
         motorPermanentlyStopped = true;
       } else {
         Serial.println("❌ Detection complete. No fire confirmed after full pipeline (TSL ➜ Pi ➜ FFT ➜ FPGA).");
-        motorRunning = true;
+        
+        // Reset motor and detection state
+        vTaskDelay(100);
+        resumeAfterFalseDetection();
+
       }
 
       // ✅ Reset for next detection attempt
@@ -240,7 +280,9 @@ float readLux() {
 }
 
 uint16_t readADC() {
-  return analogRead(ADC_pin);  // Since USE_INTERNAL_ADC is always true
+  if (USE_INTERNAL_ADC) {
+    return analogRead(ADC_pin);  // 12-bit value (0–4095)
+  } 
 }
 
 bool runFftDetection() {
@@ -252,7 +294,13 @@ bool runFftDetection() {
 
   for (uint16_t i = 0; i < samples; i++) {
     uint16_t adcValue = readADC();
-    vReal[i] = adcValue - ADC_OFFSET;
+    double x_curr = (adcValue - ADC_OFFSET) / 16.0;  // optional normalization
+    double y_curr = a * (x_curr + x_prev) + b * y_prev;
+
+    x_prev = x_curr;
+    y_prev = y_curr;
+
+    vReal[i] = y_curr;
     vImag[i] = 0.0;
     delayMicroseconds(1000000 / samplingFrequency);
   }
@@ -284,7 +332,7 @@ bool runFftDetection() {
     }
   }
 
-  bool flameDetectedNow = (activeBins >= 28) && (energySum > (3.5 * adaptiveThreshold));
+  bool flameDetectedNow = (activeBins >= 12) && (energySum > (3.5 * adaptiveThreshold));
 
   Serial.println("📊 --- FFT Detection Debug ---");
   Serial.printf("📉 Band Avg: %.1f\n", bandAvg);
@@ -330,3 +378,16 @@ void resetToStartPosition() {
     if (i % 100 == 0) vTaskDelay(1);
   }
 } 
+
+void resumeAfterFalseDetection() {
+  tslTriggered = false;
+  ema_initialized = false;
+  emaFFTInitialized = false;
+  x_prev = y_prev = 0.0;
+  resetToStartPosition();
+  stepCount = 0;
+  motorRunning = true;
+  stepperState.moveRightNext = true;
+  stepperState.currentlySweeping = false;
+  Serial.println("🔄 Resuming sweep after false detection.");
+}

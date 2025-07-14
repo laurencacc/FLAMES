@@ -3,6 +3,9 @@ import numpy as np
 import time
 import RPi.GPIO as GPIO
 
+with open("/home/laurencacc/boot_test.txt", "a") as f:
+    f.write("Boot attempt happened!/n")
+
 # --- GPIO SETUP ---
 TRIGGER_PIN = 18         # Input from ESP32
 FPGA_FLAG_OUT = 19       # Output to FPGA
@@ -59,8 +62,8 @@ while True:
         frame = cv2.convertScaleAbs(frame, alpha=1.3, beta=10)
 
         hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        lower_hsv = np.array([0, 150, 150])
-        upper_hsv = np.array([50, 255, 255])
+        lower_hsv = np.array([10, 150, 150])
+        upper_hsv = np.array([35, 255, 240])
         hsv_mask = cv2.inRange(hsv_frame, lower_hsv, upper_hsv)
 
         ycbcr_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2YCrCb)
@@ -91,15 +94,24 @@ while True:
                 cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 2)
                 cv2.putText(frame, "FIRE DETECTED", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
-        # 🔒 Latch fire detection once
+        # Latch fire detection once
         if fire_detected and not fire_latched:
             GPIO.output(FPGA_FLAG_OUT, GPIO.HIGH)
-            time.sleep(0.5)
-            print("🔥 Fire detected. Setting FPGA flag HIGH.")
+            print("Fire detected. Setting FPGA flag HIGH.")
             fire_latched = True
+            latch_start = time.time()
 
         if fire_latched:
-            continue  # Do nothing — fire has been confirmed, keep camera open if needed
+            if time.time() - latch_start > 10:
+                GPIO.output(FPGA_FLAG_OUT, GPIO.LOW)
+                print("10 seconds passed. Resetting FPGA flag and stopping detection.")
+                fire_latched = False
+                stop_camera(cap)
+                cap = None
+                break  # Exit camera loop and go back to waiting for TSL
+            else:
+                continue  # Still latched — wait out the 10s
+
         elif fire_detected:
             no_fire_start = None
         else:
