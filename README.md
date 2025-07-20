@@ -10,6 +10,9 @@ The FLAMES (Fire Detection and Monitoring for Emergency Systems) project is a re
 
 ## Project Structure
 
+- **Final_Demo/**  
+  Final demonstration setup used during the live demo to showcase core system functionality, involves code for BASYS 3 Dev Board, Custom ESP32-WROOM-32D PCB, Raspberry Pi 5, and a pinout sheet for documentation.
+
 - **Midterm_Demo/**  
   Evolved demonstration setup used during the midterm demo to showcase core system functionality, involves code for BASYS 3 Dev Board, Custom ESP32-WROOM-32D PCB, and Raspberry Pi 5.
 
